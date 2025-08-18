@@ -36,16 +36,18 @@ func (x *Xrpc) Router() http.Handler {
 
 		r.Post("/"+tangled.RepoSetDefaultBranchNSID, x.SetDefaultBranch)
 		r.Post("/"+tangled.RepoCreateNSID, x.CreateRepo)
-		r.Post("/"+tangled.RepoDeleteNSID, x.DeleteRepo)
-		r.Post("/"+tangled.RepoForkNSID, x.ForkRepo)
 		r.Post("/"+tangled.RepoForkStatusNSID, x.ForkStatus)
 		r.Post("/"+tangled.RepoForkSyncNSID, x.ForkSync)
-
 		r.Post("/"+tangled.RepoHiddenRefNSID, x.HiddenRef)
-
 		r.Post("/"+tangled.RepoMergeNSID, x.Merge)
-		r.Post("/"+tangled.RepoMergeCheckNSID, x.MergeCheck)
 	})
+
+	// merge check is an open endpoint
+	//
+	// TODO: should we constrain this more?
+	// - we can calculate on PR submit/resubmit/gitRefUpdate etc.
+	// - use ETags on clients to keep requests to a minimum
+	r.Post("/"+tangled.RepoMergeCheckNSID, x.MergeCheck)
 	return r
 }
 
