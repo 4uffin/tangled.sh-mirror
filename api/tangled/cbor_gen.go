@@ -5512,7 +5512,7 @@ func (t *RepoIssue) MarshalCBOR(w io.Writer) error {
 	}
 
 	cw := cbg.NewCborWriter(w)
-	fieldCount := 7
+	fieldCount := 6
 
 	if t.Body == nil {
 		fieldCount--
@@ -5640,28 +5640,6 @@ func (t *RepoIssue) MarshalCBOR(w io.Writer) error {
 	}
 	if _, err := cw.WriteString(string(t.Title)); err != nil {
 		return err
-	}
-
-	// t.IssueId (int64) (int64)
-	if len("issueId") > 1000000 {
-		return xerrors.Errorf("Value in field \"issueId\" was too long")
-	}
-
-	if err := cw.WriteMajorTypeHeader(cbg.MajTextString, uint64(len("issueId"))); err != nil {
-		return err
-	}
-	if _, err := cw.WriteString(string("issueId")); err != nil {
-		return err
-	}
-
-	if t.IssueId >= 0 {
-		if err := cw.WriteMajorTypeHeader(cbg.MajUnsignedInt, uint64(t.IssueId)); err != nil {
-			return err
-		}
-	} else {
-		if err := cw.WriteMajorTypeHeader(cbg.MajNegativeInt, uint64(-t.IssueId-1)); err != nil {
-			return err
-		}
 	}
 
 	// t.CreatedAt (string) (string)
@@ -5795,32 +5773,6 @@ func (t *RepoIssue) UnmarshalCBOR(r io.Reader) (err error) {
 
 				t.Title = string(sval)
 			}
-			// t.IssueId (int64) (int64)
-		case "issueId":
-			{
-				maj, extra, err := cr.ReadHeader()
-				if err != nil {
-					return err
-				}
-				var extraI int64
-				switch maj {
-				case cbg.MajUnsignedInt:
-					extraI = int64(extra)
-					if extraI < 0 {
-						return fmt.Errorf("int64 positive overflow")
-					}
-				case cbg.MajNegativeInt:
-					extraI = int64(extra)
-					if extraI < 0 {
-						return fmt.Errorf("int64 negative overflow")
-					}
-					extraI = -1 - extraI
-				default:
-					return fmt.Errorf("wrong type for int64 field: %d", maj)
-				}
-
-				t.IssueId = int64(extraI)
-			}
 			// t.CreatedAt (string) (string)
 		case "createdAt":
 
@@ -5850,11 +5802,7 @@ func (t *RepoIssueComment) MarshalCBOR(w io.Writer) error {
 	}
 
 	cw := cbg.NewCborWriter(w)
-	fieldCount := 7
-
-	if t.CommentId == nil {
-		fieldCount--
-	}
+	fieldCount := 6
 
 	if t.Owner == nil {
 		fieldCount--
@@ -5997,38 +5945,6 @@ func (t *RepoIssueComment) MarshalCBOR(w io.Writer) error {
 		}
 	}
 
-	// t.CommentId (int64) (int64)
-	if t.CommentId != nil {
-
-		if len("commentId") > 1000000 {
-			return xerrors.Errorf("Value in field \"commentId\" was too long")
-		}
-
-		if err := cw.WriteMajorTypeHeader(cbg.MajTextString, uint64(len("commentId"))); err != nil {
-			return err
-		}
-		if _, err := cw.WriteString(string("commentId")); err != nil {
-			return err
-		}
-
-		if t.CommentId == nil {
-			if _, err := cw.Write(cbg.CborNull); err != nil {
-				return err
-			}
-		} else {
-			if *t.CommentId >= 0 {
-				if err := cw.WriteMajorTypeHeader(cbg.MajUnsignedInt, uint64(*t.CommentId)); err != nil {
-					return err
-				}
-			} else {
-				if err := cw.WriteMajorTypeHeader(cbg.MajNegativeInt, uint64(-*t.CommentId-1)); err != nil {
-					return err
-				}
-			}
-		}
-
-	}
-
 	// t.CreatedAt (string) (string)
 	if len("createdAt") > 1000000 {
 		return xerrors.Errorf("Value in field \"createdAt\" was too long")
@@ -6168,42 +6084,6 @@ func (t *RepoIssueComment) UnmarshalCBOR(r io.Reader) (err error) {
 					}
 
 					t.Owner = (*string)(&sval)
-				}
-			}
-			// t.CommentId (int64) (int64)
-		case "commentId":
-			{
-
-				b, err := cr.ReadByte()
-				if err != nil {
-					return err
-				}
-				if b != cbg.CborNull[0] {
-					if err := cr.UnreadByte(); err != nil {
-						return err
-					}
-					maj, extra, err := cr.ReadHeader()
-					if err != nil {
-						return err
-					}
-					var extraI int64
-					switch maj {
-					case cbg.MajUnsignedInt:
-						extraI = int64(extra)
-						if extraI < 0 {
-							return fmt.Errorf("int64 positive overflow")
-						}
-					case cbg.MajNegativeInt:
-						extraI = int64(extra)
-						if extraI < 0 {
-							return fmt.Errorf("int64 negative overflow")
-						}
-						extraI = -1 - extraI
-					default:
-						return fmt.Errorf("wrong type for int64 field: %d", maj)
-					}
-
-					t.CommentId = (*int64)(&extraI)
 				}
 			}
 			// t.CreatedAt (string) (string)
