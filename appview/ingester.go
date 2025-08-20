@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -14,6 +15,7 @@ import (
 	"tangled.sh/tangled.sh/core/api/tangled"
 	"tangled.sh/tangled.sh/core/appview/config"
 	"tangled.sh/tangled.sh/core/appview/db"
+	"tangled.sh/tangled.sh/core/appview/pages/markup"
 	"tangled.sh/tangled.sh/core/appview/spindleverify"
 	"tangled.sh/tangled.sh/core/idresolver"
 	"tangled.sh/tangled.sh/core/rbac"
@@ -61,11 +63,13 @@ func (i *Ingester) Ingest() processFunc {
 			case tangled.ActorProfileNSID:
 				err = i.ingestProfile(e)
 			case tangled.SpindleMemberNSID:
-				err = i.ingestSpindleMember(e)
+				err = i.ingestSpindleMember(ctx, e)
 			case tangled.SpindleNSID:
-				err = i.ingestSpindle(e)
+				err = i.ingestSpindle(ctx, e)
 			case tangled.StringNSID:
 				err = i.ingestString(e)
+			case tangled.RepoIssueNSID:
+				err = i.ingestIssue(ctx, e)
 			}
 			l = i.Logger.With("nsid", e.Commit.Collection)
 		}
@@ -336,7 +340,7 @@ func (i *Ingester) ingestProfile(e *models.Event) error {
 	return nil
 }
 
-func (i *Ingester) ingestSpindleMember(e *models.Event) error {
+func (i *Ingester) ingestSpindleMember(ctx context.Context, e *models.Event) error {
 	did := e.Did
 	var err error
 
@@ -359,7 +363,7 @@ func (i *Ingester) ingestSpindleMember(e *models.Event) error {
 			return fmt.Errorf("failed to enforce permissions: %w", err)
 		}
 
-		memberId, err := i.IdResolver.ResolveIdent(context.Background(), record.Subject)
+		memberId, err := i.IdResolver.ResolveIdent(ctx, record.Subject)
 		if err != nil {
 			return err
 		}
@@ -442,7 +446,7 @@ func (i *Ingester) ingestSpindleMember(e *models.Event) error {
 	return nil
 }
 
-func (i *Ingester) ingestSpindle(e *models.Event) error {
+func (i *Ingester) ingestSpindle(ctx context.Context, e *models.Event) error {
 	did := e.Did
 	var err error
 
@@ -475,7 +479,7 @@ func (i *Ingester) ingestSpindle(e *models.Event) error {
 			return err
 		}
 
-		err = spindleverify.RunVerification(context.Background(), instance, did, i.Config.Core.Dev)
+		err = spindleverify.RunVerification(ctx, instance, did, i.Config.Core.Dev)
 		if err != nil {
 			l.Error("failed to add spindle to db", "err", err, "instance", instance)
 			return err
@@ -608,4 +612,64 @@ func (i *Ingester) ingestString(e *models.Event) error {
 	}
 
 	return nil
+}
+
+func (i *Ingester) ingestIssue(ctx context.Context, e *models.Event) error {
+	did := e.Did
+	rkey := e.Commit.RKey
+
+	var err error
+
+	l := i.Logger.With("handler", "ingestIssue", "nsid", e.Commit.Collection, "did", did, "rkey", rkey)
+	l.Info("ingesting record")
+
+	ddb, ok := i.Db.Execer.(*db.DB)
+	if !ok {
+		return fmt.Errorf("failed to index issue record, invalid db cast")
+	}
+
+	switch e.Commit.Operation {
+	case models.CommitOperationCreate:
+		raw := json.RawMessage(e.Commit.Record)
+		record := tangled.RepoIssue{}
+		err = json.Unmarshal(raw, &record)
+		if err != nil {
+			l.Error("invalid record", "err", err)
+			return err
+		}
+
+		issue := db.IssueFromRecord(did, rkey, record)
+
+		sanitizer := markup.NewSanitizer()
+		if st := strings.TrimSpace(sanitizer.SanitizeDescription(issue.Title)); st == "" {
+			return fmt.Errorf("title is empty after HTML sanitization")
+		}
+		if sb := strings.TrimSpace(sanitizer.SanitizeDefault(issue.Body)); sb == "" {
+			return fmt.Errorf("body is empty after HTML sanitization")
+		}
+
+		tx, err := ddb.BeginTx(ctx, nil)
+		if err != nil {
+			l.Error("failed to begin transaction", "err", err)
+			return err
+		}
+
+		err = db.NewIssue(tx, &issue)
+		if err != nil {
+			l.Error("failed to create issue", "err", err)
+			return err
+		}
+
+		return nil
+
+	case models.CommitOperationUpdate:
+		// TODO: implement updates
+		return nil
+
+	case models.CommitOperationDelete:
+		// TODO: implement issue deletion
+		return nil
+	}
+
+	return fmt.Errorf("unknown operation: %s", e.Commit.Operation)
 }
