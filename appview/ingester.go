@@ -665,11 +665,41 @@ func (i *Ingester) ingestIssue(ctx context.Context, e *models.Event) error {
 		return nil
 
 	case models.CommitOperationUpdate:
-		// TODO: implement updates
+		raw := json.RawMessage(e.Commit.Record)
+		record := tangled.RepoIssue{}
+		err = json.Unmarshal(raw, &record)
+		if err != nil {
+			l.Error("invalid record", "err", err)
+			return err
+		}
+
+		body := ""
+		if record.Body != nil {
+			body = *record.Body
+		}
+
+		sanitizer := markup.NewSanitizer()
+		if st := strings.TrimSpace(sanitizer.SanitizeDescription(record.Title)); st == "" {
+			return fmt.Errorf("title is empty after HTML sanitization")
+		}
+		if sb := strings.TrimSpace(sanitizer.SanitizeDefault(body)); sb == "" {
+			return fmt.Errorf("body is empty after HTML sanitization")
+		}
+
+		err = db.UpdateIssueByRkey(ddb, did, rkey, record.Title, body)
+		if err != nil {
+			l.Error("failed to update issue", "err", err)
+			return err
+		}
+
 		return nil
 
 	case models.CommitOperationDelete:
-		// TODO: implement issue deletion
+		if err := db.DeleteIssueByRkey(ddb, did, rkey); err != nil {
+			l.Error("failed to delete", "err", err)
+			return fmt.Errorf("failed to delete issue record: %w", err)
+		}
+
 		return nil
 	}
 
@@ -720,7 +750,25 @@ func (i *Ingester) ingestIssueComment(e *models.Event) error {
 		return nil
 
 	case models.CommitOperationUpdate:
-		// TODO: implement comment updates
+		raw := json.RawMessage(e.Commit.Record)
+		record := tangled.RepoIssueComment{}
+		err = json.Unmarshal(raw, &record)
+		if err != nil {
+			l.Error("invalid record", "err", err)
+			return err
+		}
+
+		sanitizer := markup.NewSanitizer()
+		if sb := strings.TrimSpace(sanitizer.SanitizeDefault(record.Body)); sb == "" {
+			return fmt.Errorf("body is empty after HTML sanitization")
+		}
+
+		err = db.UpdateCommentByRkey(ddb, did, rkey, record.Body)
+		if err != nil {
+			l.Error("failed to update issue comment", "err", err)
+			return err
+		}
+
 		return nil
 
 	case models.CommitOperationDelete:
