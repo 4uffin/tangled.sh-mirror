@@ -31,6 +31,7 @@ type Xrpc struct {
 
 func (x *Xrpc) Router() http.Handler {
 	r := chi.NewRouter()
+
 	r.Group(func(r chi.Router) {
 		r.Use(x.ServiceAuth.VerifyServiceAuth)
 

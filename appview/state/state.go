@@ -435,10 +435,8 @@ func (s *State) NewRepo(w http.ResponseWriter, r *http.Request) {
 				Rkey: rkey,
 			},
 		)
-		if err != nil {
-			l.Error("xrpc request failed", "err", err)
-			s.pages.Notice(w, "repo", fmt.Sprintf("Failed to create repository on knot server: %s.", err.Error()))
-			return
+		if err := xrpcclient.HandleXrpcErr(err); err != nil {
+			s.pages.Notice(w, "repo", err.Error())
 		}
 
 		err = db.AddRepo(tx, repo)

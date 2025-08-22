@@ -36,7 +36,6 @@ import (
 	"tangled.sh/tangled.sh/core/rbac"
 	"tangled.sh/tangled.sh/core/tid"
 	"tangled.sh/tangled.sh/core/types"
-	xrpcerr "tangled.sh/tangled.sh/core/xrpc/errors"
 	"tangled.sh/tangled.sh/core/xrpc/serviceauth"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
@@ -905,6 +904,7 @@ func (rp *Repo) AddCollaborator(w http.ResponseWriter, r *http.Request) {
 func (rp *Repo) DeleteRepo(w http.ResponseWriter, r *http.Request) {
 	user := rp.oauth.GetUser(r)
 
+	noticeId := "operation-error"
 	f, err := rp.repoResolver.Resolve(r)
 	if err != nil {
 		log.Println("failed to get repo and knot", err)
@@ -924,7 +924,7 @@ func (rp *Repo) DeleteRepo(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Printf("failed to delete record: %s", err)
-		rp.pages.Notice(w, "settings-delete", "Failed to delete repository from PDS.")
+		rp.pages.Notice(w, noticeId, "Failed to delete repository from PDS.")
 		return
 	}
 	log.Println("removed repo record ", f.RepoAt().String())
@@ -948,17 +948,11 @@ func (rp *Repo) DeleteRepo(w http.ResponseWriter, r *http.Request) {
 			Name: f.Name,
 		},
 	)
-	if err != nil {
-		xe, parseErr := xrpcerr.Unmarshal(err.Error())
-		if parseErr != nil {
-			log.Printf("failed to delete repo from knot %s: %s", f.Knot, err)
-		} else {
-			log.Printf("failed to delete repo from knot %s: %s", f.Knot, xe.Error())
-		}
-		// Continue anyway since we want to clean up local state
-	} else {
-		log.Println("removed repo from knot ", f.Knot)
+	if err := xrpcclient.HandleXrpcErr(err); err != nil {
+		rp.pages.Notice(w, noticeId, err.Error())
+		return
 	}
+	log.Println("deleted repo from knot")
 
 	tx, err := rp.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -977,7 +971,7 @@ func (rp *Repo) DeleteRepo(w http.ResponseWriter, r *http.Request) {
 	// remove collaborator RBAC
 	repoCollaborators, err := rp.enforcer.E.GetImplicitUsersForResourceByDomain(f.DidSlashRepo(), f.Knot)
 	if err != nil {
-		rp.pages.Notice(w, "settings-delete", "Failed to remove collaborators")
+		rp.pages.Notice(w, noticeId, "Failed to remove collaborators")
 		return
 	}
 	for _, c := range repoCollaborators {
@@ -989,14 +983,14 @@ func (rp *Repo) DeleteRepo(w http.ResponseWriter, r *http.Request) {
 	// remove repo RBAC
 	err = rp.enforcer.RemoveRepo(f.OwnerDid(), f.Knot, f.DidSlashRepo())
 	if err != nil {
-		rp.pages.Notice(w, "settings-delete", "Failed to update RBAC rules")
+		rp.pages.Notice(w, noticeId, "Failed to update RBAC rules")
 		return
 	}
 
 	// remove repo from db
 	err = db.RemoveRepo(tx, f.OwnerDid(), f.Name)
 	if err != nil {
-		rp.pages.Notice(w, "settings-delete", "Failed to update appview")
+		rp.pages.Notice(w, noticeId, "Failed to update appview")
 		return
 	}
 	log.Println("removed repo from db")
@@ -1025,6 +1019,7 @@ func (rp *Repo) SetDefaultBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	noticeId := "operation-error"
 	branch := r.FormValue("branch")
 	if branch == "" {
 		http.Error(w, "malformed form", http.StatusBadRequest)
@@ -1039,11 +1034,11 @@ func (rp *Repo) SetDefaultBranch(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		log.Println("failed to connect to knot server:", err)
-		rp.pages.Notice(w, "repo-settings", "Failed to connect to knot server.")
+		rp.pages.Notice(w, noticeId, "Failed to connect to knot server.")
 		return
 	}
 
-	err = tangled.RepoSetDefaultBranch(
+	xe := tangled.RepoSetDefaultBranch(
 		r.Context(),
 		client,
 		&tangled.RepoSetDefaultBranch_Input{
@@ -1051,19 +1046,13 @@ func (rp *Repo) SetDefaultBranch(w http.ResponseWriter, r *http.Request) {
 			DefaultBranch: branch,
 		},
 	)
-	if err != nil {
-		xe, parseErr := xrpcerr.Unmarshal(err.Error())
-		if parseErr != nil {
-			log.Printf("failed to set default branch: %s", err)
-			rp.pages.Notice(w, "repo-settings", "Failed to set default branch. Try again later.")
-		} else {
-			log.Printf("failed to set default branch: %s", xe.Error())
-			rp.pages.Notice(w, "repo-settings", fmt.Sprintf("Failed to set default branch: %s", xe.Message))
-		}
+	if err := xrpcclient.HandleXrpcErr(xe); err != nil {
+		log.Println("xrpc failed", "err", xe)
+		rp.pages.Notice(w, noticeId, err.Error())
 		return
 	}
 
-	w.Write(fmt.Append(nil, "default branch set to: ", branch))
+	rp.pages.HxRefresh(w)
 }
 
 func (rp *Repo) Secrets(w http.ResponseWriter, r *http.Request) {
@@ -1324,16 +1313,8 @@ func (rp *Repo) SyncRepoFork(w http.ResponseWriter, r *http.Request) {
 				Branch: ref,
 			},
 		)
-		if err != nil {
-			xe, parseErr := xrpcerr.Unmarshal(err.Error())
-			if parseErr != nil {
-				log.Printf("failed to sync repository fork: %s", err)
-				rp.pages.Notice(w, "repo", "Failed to sync repository fork.")
-			} else {
-				log.Printf("failed to sync repository fork: %s", xe.Error())
-				rp.pages.Notice(w, "repo", fmt.Sprintf("Failed to sync repository fork: %s", xe.Message))
-			}
-			return
+		if err := xrpcclient.HandleXrpcErr(err); err != nil {
+			rp.pages.Notice(w, "repo", err.Error())
 		}
 
 		rp.pages.HxRefresh(w)
@@ -1498,10 +1479,8 @@ func (rp *Repo) ForkRepo(w http.ResponseWriter, r *http.Request) {
 				Source: &forkSourceUrl,
 			},
 		)
-		if err != nil {
-			l.Error("xrpc request failed", "err", err)
-			rp.pages.Notice(w, "repo", fmt.Sprintf("Failed to create repository on knot server: %s.", err.Error()))
-			return
+		if err := xrpcclient.HandleXrpcErr(err); err != nil {
+			rp.pages.Notice(w, "repo", err.Error())
 		}
 
 		err = db.AddRepo(tx, repo)
